@@ -1,0 +1,53 @@
+name: Voyager Viral B-Roll Director
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "GitHub Release tag holding input_reel.mp4 + broll_spec.json"
+        required: true
+        default: "job-demo"
+
+permissions:
+  contents: write
+
+jobs:
+  direct-broll:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Voyager Engines
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/voyager
+          key: voyager-broll-v2026.11.2.3-v1
+
+      - name: Install FFmpeg, Python Deps, yt-dlp & Voyager Native Engines
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg mesa-vulkan-drivers libvulkan1 python3-numpy python3-pil fonts-noto-core fonts-noto-extra fontconfig
+          curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o /usr/local/bin/yt-dlp
+          chmod +x /usr/local/bin/yt-dlp
+          if [ ! -x "$HOME/.local/share/voyager/engines/bin/voyager-video" ]; then
+            mkdir -p /tmp/vp
+            REL="https://github.com/usevoyager/voyager-releases/releases/download/v2026.11.2.3"
+            curl -fsSL "$REL/voyager-pack-engine-video-0.1.37-76c7bb4d1cd0-p1-linux-x64.tar.gz" -o /tmp/vp/video.tar.gz
+            curl -fsSL "$REL/voyager-pack-engine-design-0.1.27-1b63390e1a9e-p1-linux-x64.tar.gz" -o /tmp/vp/design.tar.gz
+            curl -fsSL "$REL/voyager-pack-engine-daw-0.1.17-82052b1dd308-p1-linux-x64.tar.gz" -o /tmp/vp/daw.tar.gz
+            mkdir -p /tmp/vp/vid_extracted
+            tar -xzf /tmp/vp/video.tar.gz -C /tmp/vp/vid_extracted
+            /tmp/vp/vid_extracted/install.sh --daw /tmp/vp/daw.tar.gz --design /tmp/vp/design.tar.gz
+            "$HOME/.local/share/voyager/engines/bin/voyager-video" engine install openh264
+            rm -rf /tmp/vp
+          fi
+          echo "$HOME/.local/share/voyager/engines/bin" >> $GITHUB_PATH
+
+      - name: Compose Viral B-Roll + Dynamic Zooms + Voyager Mastering
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/assets /tmp/out
+          gh release download "${{ inputs.release_tag }}" -D /tmp/assets
+          python3 scripts/direct_broll.py /tmp/assets/broll_spec.json /tmp/assets /tmp/out
+          gh release upload "${{ inputs.release_tag }}" /tmp/out/* --clobber
